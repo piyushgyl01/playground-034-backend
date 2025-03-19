@@ -418,7 +418,7 @@ app.post("/auth/resend-verification", authenticateToken, async (req, res) => {
     }
 
     user.emailVerificationToken = crypto.randomBytes(32).toString("hex");
-    user.emailVerificationToken = Date.now() + 24 * 60 * 60 * 1000;
+    user.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000;
     await user.save();
 
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${user.emailVerificationToken}`;
@@ -442,7 +442,7 @@ app.post("/auth/login", async (req, res) => {
 
   try {
     const user = await User.findOne({
-      $or: [{ username }, { email: email || null }],
+      $or: [{ username }, { email: username }],
     });
 
     if (!user) {
@@ -479,11 +479,11 @@ app.post("/auth/login", async (req, res) => {
 
       if (!verified) {
         const backupCodeIndex = user.backupCodes?.findIndex(
-          (bc) => bc.code === mfaToken && !bc.code
+          (bc) => bc.code === mfaToken && !bc.used
         );
 
         if (backupCodeIndex === -1) {
-          return res.json(401).json({ message: "Invalid MFA Code" });
+          return res.status(401).json({ message: "Invalid MFA Code" });
         }
 
         user.backupCodes[backupCodeIndex].used = true;
@@ -541,7 +541,7 @@ app.post("/auth/forgot-password", passwordResetLimiter, async (req, res) => {
       .createHash("sha256")
       .update(resetToken)
       .toString("hex");
-    user.resetPasswordExpires = Date.now() + +60 * 60 * 1000;
+    user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // Fixed the plus sign issue
     await user.save();
 
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
@@ -775,8 +775,8 @@ app.post("/auth/refresh-token", async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(REFRESH_TOKEN_SECRET, refreshToken);
-
+    const decoded = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
+    
     const user = await User.findById(decoded.id);
 
     if (!user) {
@@ -835,7 +835,7 @@ const oauthStates = new Map();
 
 app.get("/auth/google", (req, res) => {
   const state = generateOAuthState();
-  oauthStates.set(state, { timeStamp: Date.now() });
+  oauthStates.set(state, { timestamp: Date.now() });
 
   const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   authUrl.searchParams.append("client_id", process.env.GOOGLE_CLIENT_ID);
@@ -944,7 +944,7 @@ app.get("/auth/google/callback", async (req, res) => {
 
 app.get("/auth/github", (req, res) => {
   const state = generateOAuthState();
-  oauthStates.set(state, { timeStamp: Date.now() });
+  oauthStates.set(state, { timestamp: Date.now() });
 
   const authUrl = new URL("https://github.com/login/oauth/authorize");
   authUrl.searchParams.append("client_id", process.env.GITHUB_CLIENT_ID);
@@ -983,14 +983,14 @@ app.get("/auth/github/callback", async (req, res) => {
         redirect_uri: `${process.env.API_URL}/auth/github/callback`,
       },
       {
-        headers: "application/json",
+        headers: { Accept: "application/json" },
       }
     );
 
     const { access_token } = tokenResponse.data;
 
     const userResponse = await axios.get("https://api.github.com/user", {
-      headers: { Authorization: `${access_token}` },
+      headers: { Authorization: `token ${access_token}` },
     });
 
     const githubUserInfo = userResponse.data;
@@ -1010,10 +1010,10 @@ app.get("/auth/github/callback", async (req, res) => {
         if (primaryEmail) {
           email = primaryEmail.email;
         } else if (emailResponse.data.length > 0) {
-          email = emailResponse[0].email;
+          email = emailResponse.data[0].email;
         }
       } catch (error) {
-        console.error("Error fetching GitHub emails:", emailError);
+        console.error("Error fetching GitHub emails:", error);
       }
     }
 
@@ -1071,6 +1071,8 @@ app.get("/auth/github/callback", async (req, res) => {
     res.redirect(`${process.env.FRONTEND_URL}/auth?error=github_auth_failed`);
   }
 });
+
+//CRUD
 
 app.use((req, res, next) => {
   res.status(404).json({ message: "Resource not found" });
