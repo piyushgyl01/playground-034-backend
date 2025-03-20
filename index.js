@@ -19,10 +19,12 @@ const Post = require("./models/post.model.js");
 const { timeStamp } = require("console");
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 3000;
+
+app.use(express.json());
 
 const corsOptions = {
-  origin: ["http://localhost:5173"],
+  origin: ["http://localhost:5173", "http://localhost:5174/"],
   credentials: true,
   optionSuccessStatus: 200,
 };
@@ -311,7 +313,7 @@ app.post("/auth/register", async (req, res) => {
     });
 
     if (existingUser) {
-      res.status(400).json({
+      return res.status(400).json({
         message: existingUser.username
           ? "Username already exists"
           : "Email already exists",
@@ -507,6 +509,7 @@ app.post("/auth/login", async (req, res) => {
 
     res.status(200).json({
       message: "Logged in successfully",
+      userId: user._id,
       user: userResponse,
     });
   } catch (error) {
@@ -776,7 +779,7 @@ app.post("/auth/refresh-token", async (req, res) => {
 
   try {
     const decoded = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
-    
+
     const user = await User.findById(decoded.id);
 
     if (!user) {
@@ -999,6 +1002,7 @@ app.get("/auth/github/callback", async (req, res) => {
 
     if (!email) {
       try {
+        // Fixed: Added the actual API call to fetch emails
         const emailResponse = await axios.get(
           "https://api.github.com/user/emails",
           {
@@ -1072,12 +1076,152 @@ app.get("/auth/github/callback", async (req, res) => {
   }
 });
 
-//CRUD
+// Create a new post
+app.post(
+  "/posts",
+  authenticateToken,
+  requireVerifiedEmail,
+  async (req, res) => {
+    const { title, content, tags, featuredImage, publishedAt } = req.body;
+    const authorId = req.user.id;
 
+    try {
+      const newPost = new Post({
+        title,
+        content,
+        author: authorId,
+        tags: tags || [],
+        featuredImage: featuredImage || {
+          url: "",
+          thumbnail: "",
+        },
+        publishedAt: publishedAt || null,
+      });
+
+      const savedPost = await newPost.save();
+
+      res.status(201).json({
+        message: "Post created successfully",
+        post: savedPost,
+      });
+    } catch (error) {
+      res.status(500).json({
+        message: "Error creating post",
+        error: error.message,
+      });
+    }
+  }
+);
+
+// Get all posts
+app.get("/posts", async (req, res) => {
+  try {
+    const posts = await Post.find().populate("author", "name username avatar");
+    res.status(200).json({ posts });
+  } catch (error) {
+    res.status(500).json({
+      message: "Error fetching posts",
+      error: error.message,
+    });
+  }
+});
+
+// Get a single post by ID
+app.get("/posts/:id", async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+
+    if (!post) {
+      return res.status(404).json({ message: "Unable to find the post" });
+    }
+
+    res.status(200).json({ post });
+  } catch (error) {
+    res.status(500).json({
+      message: "Error fetching post",
+      error: error.message,
+    });
+  }
+});
+
+// Update a post
+app.put(
+  "/posts/:id",
+  authenticateToken,
+  requireVerifiedEmail,
+  async (req, res) => {
+    try {
+      const post = await Post.findById(req.params.id);
+
+      if (!post) {
+        return res.status(404).json({ message: "Unable to find the post" });
+      }
+
+      if (post.author.toString() !== req.user.id) {
+        return res
+          .status(403)
+          .json({ message: "You are not authorized to update this post" });
+      }
+
+      const updatedPost = await Post.findByIdAndUpdate(
+        req.params.id,
+        { $set: req.body },
+        { new: true }
+      );
+
+      res.status(200).json({
+        message: "Post updated successfully",
+        post: updatedPost,
+      });
+    } catch (error) {
+      res.status(500).json({
+        message: "Error updating post",
+        error: error.message,
+      });
+    }
+  }
+);
+
+// Delete a post
+app.delete(
+  "/posts/:id",
+  authenticateToken,
+  requireVerifiedEmail,
+  async (req, res) => {
+    try {
+      const post = await Post.findById(req.params.id);
+
+      if (!post) {
+        return res.status(404).json({ message: "Unable to find the post" });
+      }
+
+      if (post.author.toString() !== req.user.id) {
+        return res
+          .status(403)
+          .json({ message: "You are not authorized to delete this post" });
+      }
+
+      await Post.findByIdAndDelete(req.params.id);
+
+      res.status(200).json({
+        message: "Post deleted successfully",
+        post: post,
+      });
+    } catch (error) {
+      res.status(500).json({
+        message: "Error deleting post",
+        error: error.message,
+      });
+    }
+  }
+);
+
+// 404 handler
 app.use((req, res, next) => {
   res.status(404).json({ message: "Resource not found" });
 });
 
+// Global error handler
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(500).json({
