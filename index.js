@@ -24,7 +24,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 const corsOptions = {
-  origin: ["http://localhost:5173", "http://localhost:5174/"],
+  origin: ["http://localhost:5173", "http://localhost:5174"],
   credentials: true,
   optionSuccessStatus: 200,
 };
@@ -238,7 +238,7 @@ const authenticateToken = (req, res, next) => {
   const accessToken = req.cookies.access_token;
 
   if (!accessToken) {
-    return res.status(401).json({ message: "Please log in to access." });
+    return res.status(401).json({ message: "You have been logged out. Please login again to access" });
   }
 
   try {
