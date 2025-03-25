@@ -20,6 +20,7 @@ const Post = require("./models/post.model.js");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Middleware setup
 app.use(express.json());
 
 const corsOptions = {
@@ -31,6 +32,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(cookieParser());
 
+// Environment validation
 if (!process.env.JWT_SECRET || !process.env.REFRESH_TOKEN_SECRET) {
   console.error(
     "CRITICAL ERROR: JWT secrets not set in environment variables!"
@@ -53,8 +55,10 @@ if (
 const JWT_SECRET = process.env.JWT_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 
+// Connect to database
 connectToDb();
 
+// Email transporter setup
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
   port: process.env.EMAIL_PORT,
@@ -65,6 +69,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Email utility functions
 const sendVerificationEmail = async (user, verificationUrl) => {
   try {
     await transporter.sendMail({
@@ -119,6 +124,7 @@ const sendPasswordResetEmail = async (user, resetUrl) => {
   }
 };
 
+// Password validation with zxcvbn
 const validatePassword = (password, userInfo = {}) => {
   if (password.length < 8) {
     return {
@@ -149,6 +155,7 @@ const validatePassword = (password, userInfo = {}) => {
   };
 };
 
+// Rate limiters
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -180,10 +187,12 @@ const apiLimiter = rateLimit({
   },
 });
 
+// Apply rate limiting to sensitive routes
 app.use("/auth/login", loginLimiter);
 app.use("/auth/forgot-password", passwordResetLimiter);
 app.use("/api", apiLimiter);
 
+// Token generation and management
 const generateTokens = (user) => {
   const payload = {
     id: user._id,
@@ -191,7 +200,6 @@ const generateTokens = (user) => {
   };
 
   const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: "15m" });
-
   const refreshToken = jwt.sign({ id: user._id }, REFRESH_TOKEN_SECRET, {
     expiresIn: "7d",
   });
@@ -233,13 +241,12 @@ const clearAuthCookies = (res) => {
   });
 };
 
+// Authentication middleware
 const authenticateToken = (req, res, next) => {
   const accessToken = req.cookies.access_token;
 
   if (!accessToken) {
-    return res.status(401).json({
-      message: "You have been logged out. Please login again to access.",
-    });
+    return res.status(401).json({ message: "You have been logged out. Please login again to access." });
   }
 
   try {
@@ -256,6 +263,7 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
+// Email verification middleware
 const requireVerifiedEmail = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id);
@@ -278,6 +286,9 @@ const requireVerifiedEmail = async (req, res, next) => {
   }
 };
 
+// Auth Routes
+
+// Registration endpoint
 app.post("/auth/register", async (req, res) => {
   const { username, name, email, password } = req.body;
 
@@ -315,7 +326,7 @@ app.post("/auth/register", async (req, res) => {
 
     if (existingUser) {
       return res.status(400).json({
-        message: existingUser.username
+        message: existingUser.username === username
           ? "Username already exists"
           : "Email already exists",
       });
@@ -373,6 +384,7 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
+// Email verification endpoint
 app.get("/auth/verify-email", async (req, res) => {
   const { token } = req.query;
 
@@ -408,6 +420,7 @@ app.get("/auth/verify-email", async (req, res) => {
   }
 });
 
+// Resend verification email
 app.post("/auth/resend-verification", authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -434,6 +447,7 @@ app.post("/auth/resend-verification", authenticateToken, async (req, res) => {
   }
 });
 
+// Login with MFA support
 app.post("/auth/login", async (req, res) => {
   const { username, password, mfaToken } = req.body;
 
@@ -464,6 +478,7 @@ app.post("/auth/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
+    // Handle MFA if enabled
     if (user.mfaEnabled) {
       if (!mfaToken) {
         return res.status(200).json({
@@ -514,6 +529,7 @@ app.post("/auth/login", async (req, res) => {
       user: userResponse,
     });
   } catch (error) {
+    console.error("Login error:", error);
     res.status(500).json({
       message: "Error logging in",
       error:
@@ -522,6 +538,7 @@ app.post("/auth/login", async (req, res) => {
   }
 });
 
+// Password reset request
 app.post("/auth/forgot-password", passwordResetLimiter, async (req, res) => {
   const { email } = req.body;
 
@@ -532,6 +549,7 @@ app.post("/auth/forgot-password", passwordResetLimiter, async (req, res) => {
   try {
     const user = await User.findOne({ email });
 
+    // Don't reveal if user exists (security)
     if (!user) {
       return res.status(200).json({
         message:
@@ -545,7 +563,7 @@ app.post("/auth/forgot-password", passwordResetLimiter, async (req, res) => {
       .createHash("sha256")
       .update(resetToken)
       .toString("hex");
-    user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // Fixed the plus sign issue
+    user.resetPasswordExpires = Date.now() + 60 * 60 * 1000;
     await user.save();
 
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
@@ -565,6 +583,7 @@ app.post("/auth/forgot-password", passwordResetLimiter, async (req, res) => {
   }
 });
 
+// Reset password
 app.post("/auth/reset-password", async (req, res) => {
   const { token, password } = req.body;
 
@@ -621,6 +640,7 @@ app.post("/auth/reset-password", async (req, res) => {
   }
 });
 
+// MFA setup - initialize
 app.post("/auth/mfa/setup", authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -654,6 +674,7 @@ app.post("/auth/mfa/setup", authenticateToken, async (req, res) => {
   }
 });
 
+// MFA setup - verify and enable
 app.post("/auth/mfa/verify", authenticateToken, async (req, res) => {
   const { token } = req.body;
 
@@ -681,8 +702,8 @@ app.post("/auth/mfa/verify", authenticateToken, async (req, res) => {
 
     user.mfaEnabled = true;
 
+    // Generate backup codes
     const backupCodes = [];
-
     for (let i = 0; i < 10; i++) {
       const code = crypto.randomBytes(4).toString("hex").toUpperCase();
       backupCodes.push({
@@ -690,7 +711,6 @@ app.post("/auth/mfa/verify", authenticateToken, async (req, res) => {
         used: false,
       });
     }
-
     user.backupCodes = backupCodes;
 
     await user.save();
@@ -709,6 +729,7 @@ app.post("/auth/mfa/verify", authenticateToken, async (req, res) => {
   }
 });
 
+// MFA disable
 app.post("/auth/mfa/disable", authenticateToken, async (req, res) => {
   const { password, mfaToken } = req.body;
 
@@ -727,8 +748,8 @@ app.post("/auth/mfa/disable", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "MFA is not enabled" });
     }
 
-    const validatePassword = await bcrypt.compare(password, user.password);
-    if (!validatePassword) {
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
       return res.status(401).json({ message: "Invalid password" });
     }
 
@@ -771,6 +792,7 @@ app.post("/auth/mfa/disable", authenticateToken, async (req, res) => {
   }
 });
 
+// Token refresh
 app.post("/auth/refresh-token", async (req, res) => {
   const refreshToken = req.cookies.refresh_token;
 
@@ -805,6 +827,7 @@ app.post("/auth/refresh-token", async (req, res) => {
   }
 });
 
+// User profile 
 app.get("/auth/me", authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
@@ -826,17 +849,20 @@ app.get("/auth/me", authenticateToken, async (req, res) => {
   }
 });
 
+// Logout
 app.post("/auth/logout", (req, res) => {
   clearAuthCookies(res);
   res.status(200).json({ message: "Logged out successfully" });
 });
 
+// OAuth utilities
 const generateOAuthState = () => {
   return crypto.randomBytes(32).toString("hex");
 };
 
 const oauthStates = new Map();
 
+// OAuth - Google
 app.get("/auth/google", (req, res) => {
   const state = generateOAuthState();
   oauthStates.set(state, { timestamp: Date.now() });
@@ -946,6 +972,7 @@ app.get("/auth/google/callback", async (req, res) => {
   }
 });
 
+// OAuth - GitHub
 app.get("/auth/github", (req, res) => {
   const state = generateOAuthState();
   oauthStates.set(state, { timestamp: Date.now() });
@@ -1003,7 +1030,6 @@ app.get("/auth/github/callback", async (req, res) => {
 
     if (!email) {
       try {
-        // Fixed: Added the actual API call to fetch emails
         const emailResponse = await axios.get(
           "https://api.github.com/user/emails",
           {
@@ -1045,7 +1071,6 @@ app.get("/auth/github/callback", async (req, res) => {
             githubUserInfo.login ||
             (email ? email.split("@")[0] : `user_${githubUserInfo.id}`),
           avatar: githubUserInfo.avatar_url,
-          // For OAuth users, mark email as verified
           emailVerified: true,
         });
 
@@ -1077,7 +1102,8 @@ app.get("/auth/github/callback", async (req, res) => {
   }
 });
 
-// Create a new post
+// Posts CRUD Routes
+// Create post
 app.post(
   "/posts",
   authenticateToken,
@@ -1127,7 +1153,7 @@ app.get("/posts", async (req, res) => {
   }
 });
 
-// Get a single post by ID
+// Get a single post
 app.get("/posts/:id", async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
@@ -1145,7 +1171,7 @@ app.get("/posts/:id", async (req, res) => {
   }
 });
 
-// Update a post
+// Update post
 app.put(
   "/posts/:id",
   authenticateToken,
@@ -1183,7 +1209,7 @@ app.put(
   }
 );
 
-// Delete a post
+// Delete post
 app.delete(
   "/posts/:id",
   authenticateToken,
@@ -1217,6 +1243,16 @@ app.delete(
   }
 );
 
+// Clean up expired OAuth states
+setInterval(() => {
+  const now = Date.now();
+  for (const [state, data] of oauthStates.entries()) {
+    if (now - data.timestamp > 10 * 60 * 1000) {
+      oauthStates.delete(state);
+    }
+  }
+}, 5 * 60 * 1000);
+
 // 404 handler
 app.use((req, res, next) => {
   res.status(404).json({ message: "Resource not found" });
@@ -1231,6 +1267,7 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
