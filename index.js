@@ -1083,7 +1083,7 @@ app.post(
   authenticateToken,
   requireVerifiedEmail,
   async (req, res) => {
-    const { title, content, tags, featuredImage, publishedAt } = req.body;
+    const { title, content, tags, featuredImage } = req.body;
     const authorId = req.user.id;
 
     try {
@@ -1096,7 +1096,6 @@ app.post(
           url: "",
           thumbnail: "",
         },
-        publishedAt: publishedAt || null,
       });
 
       const savedPost = await newPost.save();
